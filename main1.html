@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能制造全域指挥中心 v4.0 (严谨决策版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        dark: '#0f172a',     // Slate 900 (背景)
+                        card: '#1e293b',     // Slate 800 (卡片)
+                        border: '#334155',   // Slate 700 (边框)
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background-color: #0f172a; color: #cbd5e1; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        /* --- 核心：CSS 变量定义 (由 JS 动态修改) --- */
+        :root {
+            --theme-color: #3B82F6;       /* 主题色 (默认蓝) */
+            --theme-dim: rgba(59, 130, 246, 0.15); /* 浅色背景 (默认蓝) */
+        }
+
+        /* 动态主题应用类 */
+        .dynamic-text { color: var(--theme-color); transition: color 0.3s; }
+        .dynamic-bg { background-color: var(--theme-color); transition: background-color 0.3s; }
+        .dynamic-bg-dim { background-color: var(--theme-dim); transition: background-color 0.3s; }
+        .dynamic-border { border-color: var(--theme-color); transition: border-color 0.3s; }
+        .dynamic-border-dim { border-color: rgba(255,255,255,0.1); transition: border-color 0.3s; }
+        
+        /* 导航激活态：下边框高亮 */
+        .nav-item.active {
+            background: rgba(255,255,255,0.03);
+            border-bottom: 2px solid var(--theme-color);
+            color: #fff;
+        }
+        
+        /* AI 模态框严谨风格 */
+        #decision-modal .modal-panel {
+            border: 1px solid var(--theme-color);
+            box-shadow: 0 0 40px -10px var(--theme-dim); /* 柔和的同色系光晕 */
+        }
+        
+        #decision-modal .modal-header {
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            background: linear-gradient(90deg, var(--theme-dim) 0%, transparent 100%);
+        }
+
+        /* AI Markdown 内容排版 (严谨模式) */
+        .ai-content h3 { 
+            color: var(--theme-color); 
+            font-size: 1.1rem; 
+            font-weight: 600; 
+            margin-top: 1.5rem; 
+            margin-bottom: 0.75rem; 
+            display: flex; 
+            align-items: center; 
+        }
+        .ai-content h3::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 16px;
+            background-color: var(--theme-color);
+            margin-right: 10px;
+            border-radius: 2px;
+        }
+        .ai-content ul { list-style: none; padding-left: 0; margin-bottom: 1rem; }
+        .ai-content li { 
+            margin-bottom: 0.5rem; 
+            padding-left: 1.5rem; 
+            position: relative; 
+            color: #e2e8f0; 
+        }
+        .ai-content li::before {
+            content: '•';
+            color: var(--theme-color);
+            position: absolute;
+            left: 0;
+            font-weight: bold;
+        }
+        .ai-content strong { 
+            color: #fff; 
+            font-weight: 700; 
+            border-bottom: 1px dashed var(--theme-color); /* 虚线下划线强调 */
+        }
+        
+        /* 加载动画跟随主题色 */
+        .loader {
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            border-top: 2px solid var(--theme-color);
+            width: 24px;
+            height: 24px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden text-sm" onkeydown="handleGlobalKeys(event)">
+
+    <!-- 1. 顶部全局导航 -->
+    <header class="h-14 bg-card border-b border-border flex items-center justify-between px-4 shrink-0 z-30 shadow-sm">
+        <div class="flex items-center gap-6">
+            <div class="text-lg font-bold tracking-wider text-white flex items-center gap-2">
+                <!-- 图标颜色跟随板块 -->
+                <i class="fa-solid fa-layer-group dynamic-text"></i> 
+                <span>SMCC</span>
+                <span class="text-[10px] bg-white/10 text-gray-300 px-1.5 rounded font-normal">v4.0</span>
+            </div>
+            
+            <nav class="flex h-14">
+                <button onclick="switchTab('ot')" id="nav-ot" class="nav-item h-full px-5 flex items-center gap-2 transition-all border-b-2 border-transparent text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-server"></i> <span>OT 数据</span>
+                </button>
+                <button onclick="switchTab('workflow')" id="nav-workflow" class="nav-item h-full px-5 flex items-center gap-2 transition-all border-b-2 border-transparent text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-list-check"></i> <span>MES 执行</span>
+                </button>
+                <button onclick="switchTab('info')" id="nav-info" class="nav-item h-full px-5 flex items-center gap-2 transition-all border-b-2 border-transparent text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-file-waveform"></i> <span>PLM 工艺</span>
+                </button>
+                <button onclick="switchTab('finance')" id="nav-finance" class="nav-item h-full px-5 flex items-center gap-2 transition-all border-b-2 border-transparent text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-sack-dollar"></i> <span>FIN 资金</span>
+                </button>
+            </nav>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <button onclick="generateGlobalBriefing()" class="dynamic-bg hover:opacity-90 text-white px-3 py-1.5 rounded-sm shadow-sm flex items-center gap-2 transition-all active:scale-95 text-xs font-semibold">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> 
+                <span>生成简报</span>
+            </button>
+            
+            <div class="h-5 w-px bg-gray-700 mx-2"></div>
+
+            <button onclick="openSettings()" class="w-8 h-8 rounded hover:bg-white/10 flex items-center justify-center transition-colors text-gray-400 hover:text-white">
+                <i class="fa-solid fa-gear"></i>
+            </button>
+            
+            <button onclick="toggleChat()" class="w-8 h-8 rounded hover:bg-white/10 flex items-center justify-center transition-colors text-gray-400 hover:text-white relative">
+                <i class="fa-solid fa-comment-dots dynamic-text"></i>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden relative">
+        <!-- 2. 侧边栏 -->
+        <aside class="w-56 bg-card border-r border-border flex flex-col shrink-0 z-20">
+            <div class="p-4 border-b border-border">
+                <div class="text-[10px] font-bold text-gray-500 uppercase mb-3 tracking-wider">时间维度</div>
+                <div class="space-y-1">
+                    <button onclick="switchPeriod('daily')" id="btn-daily" class="period-btn w-full flex items-center justify-between px-3 py-2 rounded-sm text-gray-400 hover:bg-white/5 transition-colors">
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-clock w-4 text-center"></i> 日报</span>
+                        <span class="text-[10px] bg-black/20 px-1.5 rounded text-gray-500 font-mono">D</span>
+                    </button>
+                    <button onclick="switchPeriod('weekly')" id="btn-weekly" class="period-btn w-full flex items-center justify-between px-3 py-2 rounded-sm text-gray-400 hover:bg-white/5 transition-colors">
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-calendar-week w-4 text-center"></i> 周报</span>
+                        <span class="text-[10px] bg-black/20 px-1.5 rounded text-gray-500 font-mono">W</span>
+                    </button>
+                    <button onclick="switchPeriod('monthly')" id="btn-monthly" class="period-btn w-full flex items-center justify-between px-3 py-2 rounded-sm text-gray-400 hover:bg-white/5 transition-colors">
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-calendar-days w-4 text-center"></i> 月报</span>
+                        <span class="text-[10px] bg-black/20 px-1.5 rounded text-gray-500 font-mono">M</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-1 p-4 overflow-y-auto" id="drill-down-menu">
+                <!-- 动态钻取菜单 -->
+            </div>
+            
+            <div class="p-3 bg-black/20 text-[10px] text-gray-600 border-t border-border flex justify-between items-center">
+                <span>Gemini API: <span id="api-status-text" class="text-gray-500">未配置</span></span>
+            </div>
+        </aside>
+
+        <!-- 3. 主工作区 -->
+        <main class="flex-1 bg-dark relative flex flex-col overflow-hidden" id="main-content">
+            <!-- 动态注入内容 -->
+        </main>
+
+        <!-- 4. 模态框与悬浮窗 -->
+        
+        <!-- API 设置弹窗 -->
+        <div id="settings-modal" class="fixed inset-0 bg-black/80 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div class="bg-card w-full max-w-md rounded border border-border shadow-2xl p-6">
+                <h3 class="text-lg font-bold text-white mb-4 border-b border-border pb-2">系统设置</h3>
+                <div class="mb-4">
+                    <label class="block text-gray-400 text-xs mb-2">Gemini API Key</label>
+                    <input type="password" id="api-key-input" class="w-full bg-dark border border-border rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 placeholder-gray-600 text-xs" placeholder="输入 Key...">
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button onclick="closeSettings()" class="px-4 py-1.5 rounded border border-border text-gray-300 hover:bg-white/5 text-xs">取消</button>
+                    <button onclick="saveApiKey()" class="dynamic-bg text-white px-4 py-1.5 rounded hover:opacity-90 text-xs">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 聊天窗口 -->
+        <div id="chat-widget" class="fixed bottom-4 right-4 w-80 h-[450px] bg-card border border-border rounded shadow-2xl flex flex-col z-40 transform translate-y-[120%] transition-transform duration-300">
+            <div class="dynamic-bg-dim px-4 py-3 border-b border-border flex justify-between items-center shrink-0">
+                <div class="font-bold text-gray-200 flex items-center gap-2"><i class="fa-solid fa-robot dynamic-text"></i> 战情助手</div>
+                <button onclick="toggleChat()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-dark/50">
+                <div class="flex gap-3">
+                    <div class="w-6 h-6 rounded-full dynamic-bg flex items-center justify-center shrink-0 text-white text-[10px]"><i class="fa-solid fa-robot"></i></div>
+                    <div class="bg-white/5 p-2 rounded text-gray-300 text-xs border border-white/5">指挥官，我是您的决策助手。请指示。</div>
+                </div>
+            </div>
+            <div class="p-3 border-t border-border bg-card">
+                <div class="flex gap-2 relative">
+                    <input type="text" id="chat-input" placeholder="输入指令..." class="w-full bg-dark border border-border rounded px-3 py-2 text-white focus:outline-none focus:border-opacity-50 dynamic-border pr-8 text-xs" onkeydown="if(event.key==='Enter') sendChatMessage()">
+                    <button onclick="sendChatMessage()" class="absolute right-2 top-2 dynamic-text hover:text-white"><i class="fa-solid fa-paper-plane"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 决策推演/简报模态框 (严谨风格) -->
+        <div id="decision-modal" class="fixed inset-0 bg-black/80 hidden z-50 flex items-center justify-center p-4 backdrop-blur-md">
+            <!-- modal-panel 类用于应用动态边框和光晕 -->
+            <div class="modal-panel bg-card w-full max-w-4xl max-h-[90vh] rounded flex flex-col overflow-hidden animate-fade-in-up">
+                <!-- 标题栏：使用渐变背景 -->
+                <div class="modal-header px-6 py-4 flex justify-between items-center shrink-0">
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2" id="modal-title">
+                        <i class="fa-solid fa-brain dynamic-text"></i> 
+                        <span>AI 决策推演</span>
+                    </h2>
+                    <div class="flex gap-4">
+                        <button onclick="closeModal()" class="text-gray-500 hover:text-white transition"><i class="fa-solid fa-times text-lg"></i></button>
+                    </div>
+                </div>
+                <!-- 内容区：深色背景，突出文字 -->
+                <div class="p-8 overflow-y-auto ai-content bg-dark" id="modal-content">
+                    <!-- AI 内容注入区 -->
+                </div>
+                <!-- 底部操作栏 -->
+                <div class="px-6 py-3 border-t border-border bg-card/50 flex justify-between items-center text-xs text-gray-500">
+                    <span>由 Gemini 2.5 Flash 提供算力支持</span>
+                    <button onclick="closeModal()" class="px-4 py-1.5 rounded border border-border text-gray-300 hover:bg-white/5">关闭报告</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. 全局配置与严谨色彩映射 ---
+        let apiKey = localStorage.getItem('smcc_gemini_key') || "";
+        
+        // 定义更专业、低饱和度的工业色彩
+        const themeMap = {
+            ot: { 
+                hex: '#3B82F6', // Blue-500
+                dim: 'rgba(59, 130, 246, 0.1)' 
+            },
+            workflow: { 
+                hex: '#10B981', // Emerald-500
+                dim: 'rgba(16, 185, 129, 0.1)' 
+            },
+            info: { 
+                hex: '#8B5CF6', // Violet-500
+                dim: 'rgba(139, 92, 246, 0.1)' 
+            },
+            finance: { 
+                hex: '#F59E0B', // Amber-500
+                dim: 'rgba(245, 158, 11, 0.1)' 
+            }
+        };
+
+        const state = { tab: 'ot', period: 'daily' };
+
+        // --- 2. 模拟数据 (保持丰富性) ---
+        const reportData = {
+            ot: {
+                drill: [{name:'OEE分析', icon:'fa-chart-pie', key:'O'}, {name:'MTBF趋势', icon:'fa-heart-pulse', key:'M'}, {name:'能耗审计', icon:'fa-bolt', key:'E'}],
+                content: {
+                    daily: {
+                        kpi: [{l:'OEE', v:'78.4%', t:'-2.1%'}, {l:'停机时间', v:'25m', t:'+10m'}, {l:'能耗单耗', v:'1.2kW', t:'-5%'}],
+                        events: [{t:'09:15', m:'2号机主轴过热报警', type:'alert'}, {t:'10:30', m:'空压机负载波动', type:'warn'}],
+                        chartTitle: '今日设备OEE时序图', chartType: 'line',
+                        chartData: { labels: ['8:00','10:00','12:00','14:00','16:00'], data: [85, 40, 90, 88, 60] },
+                        context: "10:00 主轴过热导致 OEE 骤降。建议检查冷却液流量及润滑系统状态。"
+                    },
+                    weekly: {
+                        kpi: [{l:'MTBF', v:'142h', t:'-12h'}, {l:'PM达成率', v:'98%', t:'+2%'}, {l:'维修费', v:'¥12k', t:'+2k'}],
+                        events: [{t:'周一', m:'伺服电机更换', type:'info'}],
+                        chartTitle: '本周故障类型帕累托', chartType: 'bar',
+                        chartData: { labels: ['电气','机械','液压','软件'], data: [12, 8, 5, 2] },
+                        context: "电气故障占比最高，集中在老化线路。建议安排热成像专项检测。"
+                    },
+                    monthly: {
+                        kpi: [{l:'TCO', v:'¥1.2M', t:'+8%'}, {l:'资产利用', v:'85%', t:'0%'}, {l:'大修', v:'3次', t:'+1'}],
+                        events: [], chartTitle: '资产全生命周期成本', chartType: 'line',
+                        chartData: { labels: ['W1','W2','W3','W4'], data: [20, 25, 22, 35] },
+                        context: "月末大修导致维修成本激增，但有效降低了非计划停机风险。"
+                    }
+                }
+            },
+            workflow: {
+                drill: [{name:'排产达成', icon:'fa-tasks', key:'S'}, {name:'WIP分析', icon:'fa-boxes-stacked', key:'W'}, {name:'人效分析', icon:'fa-user-clock', key:'P'}],
+                content: {
+                    daily: {
+                        kpi: [{l:'达成率', v:'94%', t:'-4%'}, {l:'WIP积压', v:'12批', t:'+2'}, {l:'人效', v:'420pc', t:'+10'}],
+                        events: [{t:'08:00', m:'早班缺勤率5%', type:'warn'}, {t:'11:00', m:'工序3缺料', type:'alert'}],
+                        chartTitle: '工单执行进度', chartType: 'doughnut',
+                        chartData: { labels: ['完工','在制','未开'], data: [65, 25, 10] },
+                        context: "缺勤和缺料导致工序3瓶颈。建议临时调拨人员并催料。"
+                    },
+                    weekly: { /* 省略以节省长度，逻辑同上 */ 
+                        kpi: [{l:'OTD', v:'96%', t:'+1%'}, {l:'FPY', v:'99%', t:'0%'}, {l:'SMED', v:'20m', t:'-5m'}],
+                        events: [], chartTitle: '周产量趋势', chartType: 'bar',
+                        chartData: { labels: ['M','T','W','T','F'], data: [100,120,110,130,125] },
+                        context: "周四产量创新高，换型优化效果显著。"
+                    },
+                    monthly: {
+                        kpi: [{l:'交付率', v:'92%', t:'-3%'}, {l:'产值', v:'¥50M', t:'+5%'}, {l:'返工', v:'1.2%', t:'-0.1%'}],
+                        events: [], chartTitle: '各产线产值贡献', chartType: 'pie',
+                        chartData: { labels: ['L1','L2','L3'], data: [40, 35, 25] },
+                        context: "L1产线贡献最大，L3受限于设备老化产能受限。"
+                    }
+                }
+            },
+            info: { /* 省略 */
+                drill: [{name:'BOM', icon:'fa-list-check', key:'B'}, {name:'ECN', icon:'fa-code-branch', key:'C'}, {name:'工艺', icon:'fa-flask', key:'T'}],
+                content: {
+                    daily: {
+                        kpi: [{l:'BOM差异', v:'1.2%', t:'+0.5%'}, {l:'黄金批次', v:'0.9', t:'0'}, {l:'ECN待办', v:'2', t:'+1'}],
+                        events: [{t:'09:00', m:'配方V2.1校验失败', type:'warn'}],
+                        chartTitle: '投料偏差监控', chartType: 'line',
+                        chartData: { labels: ['T1','T2','T3','T4'], data: [10, 10.1, 10.5, 10] },
+                        context: "投料偏差可能导致产品一致性问题。建议校准称重模块。"
+                    },
+                    weekly: { kpi:[], events:[], chartData:{labels:[],data:[]}, context:""},
+                    monthly: { kpi:[], events:[], chartData:{labels:[],data:[]}, context:""}
+                } 
+            },
+            finance: { /* 省略 */ 
+                drill: [{name:'成本', icon:'fa-money-bill-trend-up', key:'C'}, {name:'CCC', icon:'fa-rotate', key:'R'}, {name:'毛利', icon:'fa-hand-holding-dollar', key:'P'}],
+                content: {
+                    daily: {
+                        kpi: [{l:'日成本', v:'-¥5k', t:'恶化'}, {l:'料差', v:'+3%', t:''}, {l:'工差', v:'-1%', t:''}],
+                        events: [{t:'16:00', m:'Batch#405 贵金属超耗', type:'alert'}],
+                        chartTitle: '成本方差分解', chartType: 'bar',
+                        chartData: { labels: ['量差','价差','效率','能源'], data: [-4000, 500, 1000, -200] },
+                        context: "量差（超耗）是主要亏损源。建议冻结该批次，工艺人员介入分析。"
+                    },
+                    weekly: { kpi:[], events:[], chartData:{labels:[],data:[]}, context:""},
+                    monthly: { kpi:[], events:[], chartData:{labels:[],data:[]}, context:""}
+                }
+            }
+        };
+
+        // --- 3. 核心逻辑 ---
+
+        function init() {
+            updateApiStatus();
+            render();
+        }
+
+        function render() {
+            const theme = themeMap[state.tab];
+            const data = reportData[state.tab].content[state.period] || reportData[state.tab].content.daily;
+
+            // 关键：动态注入 CSS 变量，控制全局和模态框颜色
+            const root = document.documentElement;
+            root.style.setProperty('--theme-color', theme.hex);
+            root.style.setProperty('--theme-dim', theme.dim);
+
+            // 更新导航
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.getElementById(`nav-${state.tab}`).classList.add('active');
+
+            // 更新时间维度
+            document.querySelectorAll('.period-btn').forEach(el => {
+                el.classList.remove('active');
+                el.style.borderLeftColor = 'transparent';
+                el.style.color = '#94a3b8';
+                el.style.backgroundColor = 'transparent';
+            });
+            const activePeriod = document.getElementById(`btn-${state.period}`);
+            activePeriod.classList.add('active');
+            activePeriod.style.borderLeftColor = theme.hex;
+            activePeriod.style.color = '#fff';
+            activePeriod.style.backgroundColor = 'rgba(255,255,255,0.05)';
+
+            // 更新钻取菜单
+            const drillHTML = reportData[state.tab].drill.map(d => `
+                <button class="w-full text-left px-3 py-2 rounded-sm text-gray-400 hover:bg-white/5 transition-colors flex justify-between items-center group">
+                    <span class="flex items-center gap-2"><i class="fa-solid ${d.icon} w-4 text-center dynamic-text"></i> ${d.name}</span>
+                    <span class="text-[10px] border border-gray-700 px-1 rounded opacity-50 font-mono group-hover:border-gray-500">${d.key}</span>
+                </button>
+            `).join('');
+            document.getElementById('drill-down-menu').innerHTML = `<div class="text-[10px] font-bold text-gray-500 uppercase mt-4 mb-2 px-4 tracking-wider">深度钻取</div><div class="space-y-1 px-2">${drillHTML}</div>`;
+
+            // 渲染主网格
+            const main = document.getElementById('main-content');
+            main.innerHTML = `
+                <div class="grid grid-cols-12 grid-rows-12 gap-4 p-4 h-full">
+                    ${data.kpi.map(k => `
+                        <div class="col-span-12 md:col-span-4 row-span-2 bg-card rounded-sm p-4 border-l-2 dynamic-border shadow-sm flex flex-col justify-between">
+                            <div class="text-xs text-gray-400 uppercase tracking-wide flex justify-between">
+                                ${k.l} <i class="fa-solid fa-ellipsis text-gray-600 hover:text-white cursor-pointer"></i>
+                            </div>
+                            <div class="flex items-baseline gap-2">
+                                <span class="text-2xl font-bold text-white">${k.v}</span>
+                                ${k.t ? `<span class="text-xs ${k.t.includes('-')||k.t.includes('恶化') ? 'text-red-400' : 'text-green-400'}">${k.t}</span>` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+
+                    <div class="col-span-12 row-span-1 bg-card/30 rounded-sm flex items-center px-4 border border-border">
+                        <div class="text-xs font-bold dynamic-text mr-4 shrink-0 flex items-center gap-1">
+                            <i class="fa-solid fa-bell"></i> 消息
+                        </div>
+                        <div class="flex-1 overflow-hidden relative h-full flex items-center">
+                            <div class="whitespace-nowrap text-sm text-gray-400">
+                                ${data.events.map(e => `<span class="mr-6 font-mono text-xs opacity-60">[${e.t}]</span> <span class="${e.type==='alert'?'text-red-400':'text-yellow-400'}">${e.m}</span>`).join('<span class="mx-4 text-gray-700">|</span>') || '系统运行平稳。'}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-span-12 row-span-9 bg-card rounded-sm p-5 border border-border shadow-md relative flex flex-col">
+                        <div class="flex justify-between items-center mb-4 shrink-0">
+                            <h3 class="text-white font-bold flex items-center gap-2 text-sm">
+                                <i class="fa-solid fa-chart-line dynamic-text"></i> ${data.chartTitle}
+                            </h3>
+                            <button onclick="triggerAIDecision()" class="dynamic-bg hover:opacity-90 text-white px-3 py-1.5 rounded-sm text-xs font-semibold flex items-center gap-2 shadow-sm transition-all">
+                                <i class="fa-solid fa-brain"></i> AI 决策推演
+                            </button>
+                        </div>
+                        <div class="flex-1 relative w-full overflow-hidden">
+                            <canvas id="mainChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            renderChart(data, theme);
+        }
+
+        // --- 4. 图表渲染 ---
+        let chartInstance = null;
+        function renderChart(data, theme) {
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            if(chartInstance) chartInstance.destroy();
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+            gradient.addColorStop(0, theme.hex + '66'); // 40% opacity
+            gradient.addColorStop(1, theme.hex + '00'); // 0% opacity
+
+            const config = {
+                type: data.chartType || 'line',
+                data: {
+                    labels: data.chartData.labels,
+                    datasets: [{
+                        label: '数值',
+                        data: data.chartData.data,
+                        borderColor: theme.hex,
+                        backgroundColor: data.chartType === 'line' ? gradient : theme.hex,
+                        borderWidth: 2,
+                        pointBackgroundColor: '#1e293b',
+                        pointBorderColor: theme.hex,
+                        pointRadius: 4,
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { grid: { color: '#334155', drawBorder: false }, ticks: { color: '#64748b', font: {size: 10} } },
+                        x: { grid: { display: false }, ticks: { color: '#64748b', font: {size: 10} } }
+                    }
+                }
+            };
+            
+            if(data.chartType === 'doughnut' || data.chartType === 'pie') {
+                config.data.datasets[0].backgroundColor = [theme.hex, '#475569', '#1e293b'];
+                config.data.datasets[0].borderColor = '#1e293b';
+                delete config.options.scales;
+            }
+
+            chartInstance = new Chart(ctx, config);
+        }
+
+        // --- 5. Gemini AI 逻辑 ---
+        async function callGemini(prompt) {
+            if (!apiKey) {
+                return new Promise(resolve => setTimeout(() => resolve(`
+                    <h3>⚠️ 演示模式</h3>
+                    <p>请点击顶部 <i class="fa-solid fa-gear"></i> 配置您的 Gemini API Key 以获取实时 AI 分析。</p>
+                    <p><strong>模拟结论：</strong> 当前检测到数据波动，建议关注上述 KPI 变化趋势。</p>
+                `), 800));
+            }
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const data = await response.json();
+                return data.candidates[0].content.parts[0].text;
+            } catch (e) {
+                console.error(e);
+                return "<h3>🚫 连接错误</h3><p>无法连接 Gemini API，请检查网络设置。</p>";
+            }
+        }
+
+        async function triggerAIDecision() {
+            const modal = document.getElementById('decision-modal');
+            const content = document.getElementById('modal-content');
+            modal.classList.remove('hidden');
+            // 显示加载状态
+            content.innerHTML = '<div class="flex flex-col items-center justify-center py-16 gap-4"><div class="loader"></div><div class="text-gray-500 font-mono text-xs">正在进行决策推演...</div></div>';
+            
+            const data = reportData[state.tab].content[state.period] || reportData[state.tab].content.daily;
+            const prompt = `
+                角色：工业指挥中心决策引擎。
+                场景：${state.tab.toUpperCase()}板块 - ${state.period.toUpperCase()}。
+                数据：${JSON.stringify(data.kpi)}。
+                事件：${JSON.stringify(data.events)}。
+                背景：${data.context}。
+                要求：输出 HTML，不包含 markdown 代码块标记。
+                结构：
+                1. <h3>态势感知</h3>：简述核心问题。
+                2. <h3>根因分析</h3>：分析原因。
+                3. <h3>行动建议</h3>：列出 2 条带有 <strong>加粗重点</strong> 的建议。
+            `;
+            const html = await callGemini(prompt);
+            content.innerHTML = html;
+        }
+
+        async function generateGlobalBriefing() {
+            // 简报使用默认蓝色或特定“指挥色”，这里使用当前 Tab 色保持一致性，或强制蓝色
+            // 为了严谨，建议保持当前 Tab 色，体现“从当前视角出发的全局报告”
+            const modal = document.getElementById('decision-modal');
+            const content = document.getElementById('modal-content');
+            document.getElementById('modal-title').innerHTML = '<i class="fa-solid fa-file-contract dynamic-text"></i> 全域指挥简报';
+            modal.classList.remove('hidden');
+            content.innerHTML = '<div class="flex flex-col items-center justify-center py-16 gap-4"><div class="loader"></div><div class="text-gray-500 font-mono text-xs">正在综合全域数据...</div></div>';
+            
+            let context = "";
+            ['ot','workflow','info','finance'].forEach(t => {
+                const d = reportData[t].content.daily;
+                context += `[${t}] KPI:${JSON.stringify(d.kpi)}\n`;
+            });
+
+            const prompt = `
+                角色：工厂指挥官参谋。
+                任务：生成全域交接班简报（HTML）。
+                数据：${context}
+                结构：
+                1. <h3>运营综述</h3>：整体评价。
+                2. <h3>重点关注</h3>：列出2个风险点。
+                3. <h3>指令</h3>：下个班次执行重点。
+            `;
+            const html = await callGemini(prompt);
+            content.innerHTML = html;
+        }
+
+        // --- 6. 基础交互 ---
+        function switchTab(t) { state.tab = t; render(); }
+        function switchPeriod(p) { state.period = p; render(); }
+        
+        function openSettings() {
+            document.getElementById('api-key-input').value = apiKey;
+            document.getElementById('settings-modal').classList.remove('hidden');
+        }
+        function closeSettings() { document.getElementById('settings-modal').classList.add('hidden'); }
+        function saveApiKey() {
+            const val = document.getElementById('api-key-input').value.trim();
+            if(val) { apiKey = val; localStorage.setItem('smcc_gemini_key', apiKey); updateApiStatus(); closeSettings(); }
+        }
+        function updateApiStatus() {
+            const el = document.getElementById('api-status-text');
+            el.innerText = apiKey ? '已配置' : '未配置';
+            el.className = apiKey ? 'text-emerald-500 font-bold' : 'text-gray-500';
+        }
+
+        function toggleChat() { 
+            const el = document.getElementById('chat-widget');
+            el.style.transform = el.style.transform === 'translateY(0%)' ? 'translateY(120%)' : 'translateY(0%)';
+        }
+        async function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const msgs = document.getElementById('chat-messages');
+            const val = input.value.trim();
+            if(!val) return;
+            msgs.innerHTML += `<div class="bg-white/10 p-2 rounded text-gray-200 text-xs self-end text-right border border-white/5 ml-8">${val}</div>`;
+            input.value = '';
+            const loadingId = Date.now();
+            msgs.innerHTML += `<div id="${loadingId}" class="bg-gray-800 p-2 rounded text-gray-400 self-start mr-8 text-xs flex items-center gap-2"><div class="loader w-3 h-3 border-2"></div> ...</div>`;
+            const reply = await callGemini(val);
+            document.getElementById(loadingId).innerHTML = reply;
+        }
+        
+        function closeModal() { document.getElementById('decision-modal').classList.add('hidden'); }
+        
+        function handleGlobalKeys(e) {
+            if(e.altKey && e.key>='1' && e.key<='4') switchTab(['ot','workflow','info','finance'][parseInt(e.key)-1]);
+            if(e.key==='Escape') { closeModal(); closeSettings(); document.getElementById('chat-widget').style.transform='translateY(120%)'; }
+        }
+
+        init();
+    </script>
+</body>
+</html>
